@@ -32,12 +32,17 @@ import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.net.HttpURLConnection;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
+import java.util.Arrays;
+import java.util.NoSuchElementException;
 import lombok.EqualsAndHashCode;
 import org.takes.HttpException;
 import org.takes.Request;
 import org.takes.Response;
 import org.takes.Take;
+import org.takes.rq.RqHeaders;
 import org.takes.rq.RqLive;
+import org.takes.rq.RqMethod;
 import org.takes.rq.RqWithHeaders;
 import org.takes.rs.RsPrint;
 import org.takes.rs.RsText;
@@ -46,7 +51,8 @@ import org.takes.rs.RsWithStatus;
 /**
  * Basic back-end.
  *
- * <p>The class is immutable and thread-safe.
+ * <p>
+ * The class is immutable and thread-safe.
  *
  * @author Yegor Bugayenko (yegor@teamed.io)
  * @version $Id$
@@ -56,6 +62,18 @@ import org.takes.rs.RsWithStatus;
  */
 @EqualsAndHashCode(of = "take")
 public final class BkBasic implements Back {
+    /**
+     * All HTTP Request methods.
+     */
+    private static final String[] METHODS = new String[] {
+            RqMethod.GET, RqMethod.POST, RqMethod.PUT, RqMethod.DELETE,
+            RqMethod.HEAD, RqMethod.OPTIONS,
+    };
+
+    /**
+     * Default timeout setting.
+     */
+    private static final long TIMEOUT = 5000;
 
     /**
      * Take.
@@ -72,18 +90,57 @@ public final class BkBasic implements Back {
 
     @Override
     public void accept(final Socket socket) throws IOException {
-        final InputStream input = socket.getInputStream();
-        try {
-            this.print(
-                BkBasic.addSocketHeaders(
-                    new RqLive(input),
-                    socket
-                ),
-                new BufferedOutputStream(socket.getOutputStream())
-            );
-        } finally {
-            input.close();
+        final TimeoutInputStream input =
+            new TimeoutInputStream(socket.getInputStream(), TIMEOUT);
+        final OutputStream output = socket.getOutputStream();
+        boolean keepAlive = true;
+        while (keepAlive) {
+            keepAlive = this.handleRequest(input, output, socket);
         }
+        input.close();
+        output.close();
+    }
+
+    /**
+     * Handles HTTP request.
+     * @param input InputStream
+     * @param output OutputStream
+     * @param socket Socket
+     * @return Whether keep alive the connection
+     * @throws IOException IOException
+     */
+    private boolean handleRequest(
+        final InputStream input,
+        final OutputStream output,
+        final Socket socket) throws IOException {
+        Request req = null;
+        boolean keepAlive = true;
+        boolean error = false;
+        try {
+            req = new RqLive(input);
+            try {
+                final String method = new RqMethod.Base(req).method();
+                if (!Arrays.asList(BkBasic.METHODS).contains(method)) {
+                    error = true;
+                }
+            } catch (final NoSuchElementException ex) {
+                error = true;
+            }
+        } catch (final SocketTimeoutException ex) {
+            error = true;
+        }
+        if (!error) {
+            req = BkBasic.addSocketHeaders(req, socket);
+            if ("close".equalsIgnoreCase(
+                    new RqHeaders.Smart(new RqHeaders.Base(req))
+                    .single("connection", "keep-alive")
+                )
+            ) {
+                keepAlive = false;
+            }
+            this.print(req, new BufferedOutputStream(output));
+        }
+        return keepAlive && !error;
     }
 
     /**
@@ -102,13 +159,11 @@ public final class BkBasic implements Back {
             // @checkstyle IllegalCatchCheck (7 lines)
         } catch (final Throwable ex) {
             new RsPrint(
-                BkBasic.failure(
-                    ex,
-                    HttpURLConnection.HTTP_INTERNAL_ERROR
+                    BkBasic.failure(ex, HttpURLConnection.HTTP_INTERNAL_ERROR)
                 )
-            ).print(output);
+                .print(output);
         } finally {
-            output.close();
+            output.flush();
         }
     }
 
@@ -135,7 +190,8 @@ public final class BkBasic implements Back {
      * @param socket Socket
      * @return Request with custom headers
      */
-    private static Request addSocketHeaders(final Request req,
+    private static Request addSocketHeaders(
+        final Request req,
         final Socket socket) {
         return new RqWithHeaders(
             req,
