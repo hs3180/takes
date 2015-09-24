@@ -76,16 +76,20 @@ class TimeoutInputStream extends FilterInputStream {
     @Override
     public int read() throws IOException {
         final ExecutorService executor = Executors.newSingleThreadExecutor();
-        final Future<Integer> future = executor.submit(new ReadTask(in));
+        final Future<Integer> future = executor.submit(new ReadTask(this.in));
         int ret = -1;
+        boolean isTimeout = false;
         try {
             ret = future.get(this.timeout, TimeUnit.MILLISECONDS);
         } catch (final InterruptedException ex) {
-            throw new IOException(ex.getCause());
+            throw new IOException(ex);
         } catch (final ExecutionException ex) {
-            throw new IOException(ex.getCause());
+            throw new IOException(ex);
         } catch (final TimeoutException ex) {
-            throw new SocketTimeoutException(ex.getMessage());
+            isTimeout = true;
+        }
+        if (isTimeout) {
+            throw new SocketTimeoutException();
         }
         return ret;
     }
@@ -95,7 +99,7 @@ class TimeoutInputStream extends FilterInputStream {
         /**
          * InputStream to be read.
          */
-        private InputStream input;
+        private final transient InputStream input;
 
         /**
          * Constructor of ReadTask.
