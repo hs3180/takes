@@ -26,10 +26,14 @@ package org.takes.it.fm;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.net.Socket;
 import java.net.URL;
+import java.util.LinkedList;
+import java.util.List;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -77,26 +81,30 @@ public final class KeepAliveITCase {
         final String host,
         final String file
     ) throws IOException {
+        final InputStream input = socket.getInputStream();
         final BufferedReader inFromServer =
-            new BufferedReader(
-                new InputStreamReader(socket.getInputStream())
-            );
+            new BufferedReader(new InputStreamReader(input));
+        final OutputStream output = socket.getOutputStream();
         final OutputStreamWriter outWriter =
-            new OutputStreamWriter(socket.getOutputStream());
+            new OutputStreamWriter(output);
         outWriter.write(
             "GET " + file + " HTTP/1.1" + CRLF
             + "Host: " + host + CRLF
             + CRLF
         );
         outWriter.flush();
-        final StringBuffer out = new StringBuffer();
-        String input;
-        while ((input = inFromServer.readLine()) != null) {
-            out.append(input);
-        }
-        Assert.assertTrue(
-            "Couldn't receive 200 response",
-            out.toString().startsWith("HTTP/1.1 200 OK")
-        );
+        final List<String> head = new LinkedList<String>();
+        String line;
+        int len = 0;
+        do {
+            line = inFromServer.readLine();
+            head.add(line);
+            if (line.startsWith("Content-Length:")) {
+                len = Integer.parseInt(line.split(" ")[1]);
+            }
+        } while (!"".equals(line));
+        final byte[] buf = new byte[len];
+        input.read(buf);
+        Assert.assertTrue(head.contains("HTTP/1.1 200 OK"));
     }
 }
