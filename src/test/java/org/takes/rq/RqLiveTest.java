@@ -23,13 +23,15 @@
  */
 package org.takes.rq;
 
-import com.google.common.base.Joiner;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+
 import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
 import org.junit.Test;
 import org.takes.Request;
+
+import com.google.common.base.Joiner;
 
 /**
  * Test case for {@link RqLive}.
@@ -39,6 +41,15 @@ import org.takes.Request;
  */
 public final class RqLiveTest {
 
+	/**
+	 * RqLive can build request from empty input stream
+	 * @throws IOException If some problem inside
+	 */
+	@Test
+	public void emptyInputStream() throws IOException {
+		final Request req = new RqLive(new ByteArrayInputStream(new byte[0]));
+	}
+	
     /**
      * RqLive can build a request.
      * @throws IOException If some problem inside
